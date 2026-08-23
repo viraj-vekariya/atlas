@@ -1,5 +1,7 @@
+#include <utility>
 #include <vector>
 
+#include "atlas/astar.hpp"
 #include "atlas/dijkstra.hpp"
 #include "atlas/graph.hpp"
 #include "test_framework.hpp"
@@ -68,6 +70,53 @@ TEST(dijkstra_reports_not_found_on_disconnected_graph_without_crashing) {
     NodeId x = g.AddNode(Point{0, 0});
     NodeId y = g.AddNode(Point{100, 100});  // no edge at all
     PathResult r = DijkstraShortestPath(g, x, y);
+    ASSERT_TRUE(!r.found);
+}
+
+TEST(astar_finds_correct_shortest_path_on_hand_checked_graph) {
+    Graph g = SmallHandCheckedGraph();
+    PathResult r = AStarShortestPath(g, 0, 2);
+    ASSERT_TRUE(r.found);
+    ASSERT_EQ(r.distance, 3.0);
+    std::vector<NodeId> expected = {0, 3, 2};
+    ASSERT_TRUE(r.path == expected);
+}
+
+TEST(dijkstra_and_astar_agree_on_distance_across_large_synthetic_graph) {
+    // A* must find the SAME optimal distance as Dijkstra, not just "a"
+    // path -- if the heuristic's admissibility were broken this could
+    // diverge. (This test is why the highway-edge discount bug described
+    // in the README was caught immediately rather than shipping silently:
+    // the discounted version of GenerateSyntheticRoadNetwork failed this
+    // exact test on some query pairs before the fix.)
+    Graph g = GenerateSyntheticRoadNetwork(40, 40, /*seed=*/1);
+    std::vector<std::pair<NodeId, NodeId>> queries = {
+        {0, 1599}, {200, 1000}, {50, 1550}, {777, 42}, {900, 50}};
+    for (auto [s, t] : queries) {
+        PathResult dij = DijkstraShortestPath(g, s, t);
+        PathResult astar = AStarShortestPath(g, s, t);
+        ASSERT_TRUE(dij.found);
+        ASSERT_TRUE(astar.found);
+        ASSERT_TRUE(dij.distance - astar.distance < 1e-6 && astar.distance - dij.distance < 1e-6);
+    }
+}
+
+TEST(astar_expands_meaningfully_fewer_nodes_than_dijkstra_on_large_graph) {
+    Graph g = GenerateSyntheticRoadNetwork(60, 60, /*seed=*/42);
+    PathResult dij = DijkstraShortestPath(g, 0, static_cast<NodeId>(g.NodeCount() - 1));
+    PathResult astar = AStarShortestPath(g, 0, static_cast<NodeId>(g.NodeCount() - 1));
+    ASSERT_TRUE(dij.found);
+    ASSERT_TRUE(astar.found);
+    // Not a tight bound -- just confirms the heuristic is doing real work,
+    // not degenerating to Dijkstra.
+    ASSERT_TRUE(astar.nodes_expanded < dij.nodes_expanded);
+}
+
+TEST(astar_reports_not_found_on_disconnected_graph_without_crashing) {
+    Graph g;
+    NodeId x = g.AddNode(Point{0, 0});
+    NodeId y = g.AddNode(Point{100, 100});
+    PathResult r = AStarShortestPath(g, x, y);
     ASSERT_TRUE(!r.found);
 }
 
