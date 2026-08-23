@@ -1,7 +1,7 @@
 CXX := c++
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -g -Iinclude
 
-SRC := src/graph.cpp src/dijkstra.cpp src/astar.cpp
+SRC := src/graph.cpp src/dijkstra.cpp src/astar.cpp src/tour.cpp
 BUILD := build
 
 .PHONY: all cli test clean

@@ -1,9 +1,11 @@
+#include <algorithm>
 #include <utility>
 #include <vector>
 
 #include "atlas/astar.hpp"
 #include "atlas/dijkstra.hpp"
 #include "atlas/graph.hpp"
+#include "atlas/tour.hpp"
 #include "test_framework.hpp"
 
 using namespace atlas;
@@ -118,6 +120,32 @@ TEST(astar_reports_not_found_on_disconnected_graph_without_crashing) {
     NodeId y = g.AddNode(Point{100, 100});
     PathResult r = AStarShortestPath(g, x, y);
     ASSERT_TRUE(!r.found);
+}
+
+TEST(two_opt_never_makes_the_tour_longer_than_nearest_neighbor) {
+    Graph g = GenerateSyntheticRoadNetwork(30, 30, /*seed=*/9);
+    std::vector<NodeId> stops = {0, 45, 112, 300, 421, 555, 610, 733, 812, 899};
+    auto dist = PairwiseRoadDistances(g, stops);
+    Tour nn = NearestNeighborTour(stops, dist);
+    Tour improved = TwoOptImprove(nn, stops, dist);
+    ASSERT_TRUE(improved.length <= nn.length + 1e-9);
+}
+
+TEST(two_opt_result_is_a_valid_permutation_returning_to_the_depot) {
+    Graph g = GenerateSyntheticRoadNetwork(20, 20, /*seed=*/3);
+    std::vector<NodeId> stops = {0, 15, 88, 150, 210, 305};
+    auto dist = PairwiseRoadDistances(g, stops);
+    Tour nn = NearestNeighborTour(stops, dist);
+    Tour improved = TwoOptImprove(nn, stops, dist);
+
+    ASSERT_EQ(improved.stops.size(), stops.size() + 1);  // + return to depot
+    ASSERT_EQ(improved.stops.front(), stops[0]);
+    ASSERT_EQ(improved.stops.back(), stops[0]);
+    std::vector<NodeId> middle(improved.stops.begin(), improved.stops.end() - 1);
+    std::sort(middle.begin(), middle.end());
+    std::vector<NodeId> expected = stops;
+    std::sort(expected.begin(), expected.end());
+    ASSERT_TRUE(middle == expected);
 }
 
 int main() { return testing::RunAll(); }
