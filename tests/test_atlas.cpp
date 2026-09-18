@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "atlas/astar.hpp"
+#include "atlas/bidirectional_dijkstra.hpp"
 #include "atlas/dijkstra.hpp"
 #include "atlas/graph.hpp"
 #include "atlas/tour.hpp"
@@ -53,6 +54,24 @@ Graph SmallHandCheckedGraph() {
     g.AddEdge(0, 2, 5.0);
     g.AddEdge(0, 3, 2.0);
     g.AddEdge(3, 2, 1.0);
+    return g;
+}
+
+// Bidirectional Dijkstra's backward search walks NeighborsOf(n) same as the
+// forward search does (see bidirectional_dijkstra.hpp for why: this repo's
+// real graphs are always undirected). SmallHandCheckedGraph() above uses
+// directed edges deliberately, to test that plain Dijkstra/A* respect edge
+// direction -- it is NOT a valid fixture for bidirectional Dijkstra, whose
+// backward search would silently explore the wrong direction on it. This
+// is a genuinely separate small hand-checked graph, built undirected.
+Graph SmallHandCheckedUndirectedGraph() {
+    Graph g;
+    for (int i = 0; i < 4; ++i) g.AddNode(Point{static_cast<double>(i), 0.0});
+    g.AddUndirectedEdge(0, 1, 1.0);
+    g.AddUndirectedEdge(1, 2, 3.0);
+    g.AddUndirectedEdge(0, 2, 5.0);
+    g.AddUndirectedEdge(0, 3, 2.0);
+    g.AddUndirectedEdge(3, 2, 1.0);
     return g;
 }
 
@@ -146,6 +165,60 @@ TEST(two_opt_result_is_a_valid_permutation_returning_to_the_depot) {
     std::vector<NodeId> expected = stops;
     std::sort(expected.begin(), expected.end());
     ASSERT_TRUE(middle == expected);
+}
+
+TEST(bidirectional_dijkstra_finds_correct_shortest_path_on_hand_checked_graph) {
+    Graph g = SmallHandCheckedUndirectedGraph();
+    PathResult r = BidirectionalDijkstraShortestPath(g, 0, 2);
+    ASSERT_TRUE(r.found);
+    ASSERT_EQ(r.distance, 3.0);
+}
+
+TEST(bidirectional_dijkstra_reports_not_found_on_disconnected_graph_without_crashing) {
+    Graph g;
+    NodeId x = g.AddNode(Point{0, 0});
+    NodeId y = g.AddNode(Point{100, 100});
+    PathResult r = BidirectionalDijkstraShortestPath(g, x, y);
+    ASSERT_TRUE(!r.found);
+}
+
+TEST(bidirectional_dijkstra_start_equals_goal_is_zero_distance) {
+    Graph g = SmallHandCheckedUndirectedGraph();
+    PathResult r = BidirectionalDijkstraShortestPath(g, 1, 1);
+    ASSERT_TRUE(r.found);
+    ASSERT_EQ(r.distance, 0.0);
+    ASSERT_EQ(r.path.size(), static_cast<size_t>(1));
+}
+
+TEST(bidirectional_dijkstra_agrees_with_dijkstra_and_astar_across_large_synthetic_graph) {
+    // This is the test that caught the real bug: an early version only
+    // checked "is this exact node finalized on both sides", which missed
+    // the case where the optimal path crosses via an edge between a
+    // forward-finalized node and an already-backward-finalized neighbor
+    // that never itself becomes forward-finalized. That version passed
+    // the small hand-checked graph above (too small to expose the gap)
+    // but failed here, on most queries, with bidirectional_dijkstra
+    // reporting a longer-than-optimal distance. See README "Hardest bug".
+    Graph g = GenerateSyntheticRoadNetwork(40, 40, /*seed=*/1);
+    std::vector<std::pair<NodeId, NodeId>> queries = {
+        {0, 1599}, {200, 1000}, {50, 1550}, {777, 42}, {900, 50},
+        {175, 1220}, {1372, 1257}, {1470, 583}, {904, 1239}, {33, 1567}};
+    for (auto [s, t] : queries) {
+        PathResult dij = DijkstraShortestPath(g, s, t);
+        PathResult bidir = BidirectionalDijkstraShortestPath(g, s, t);
+        ASSERT_TRUE(dij.found);
+        ASSERT_TRUE(bidir.found);
+        ASSERT_TRUE(dij.distance - bidir.distance < 1e-6 && bidir.distance - dij.distance < 1e-6);
+    }
+}
+
+TEST(bidirectional_dijkstra_expands_fewer_nodes_than_plain_dijkstra_on_large_graph) {
+    Graph g = GenerateSyntheticRoadNetwork(60, 60, /*seed=*/42);
+    PathResult dij = DijkstraShortestPath(g, 0, static_cast<NodeId>(g.NodeCount() - 1));
+    PathResult bidir = BidirectionalDijkstraShortestPath(g, 0, static_cast<NodeId>(g.NodeCount() - 1));
+    ASSERT_TRUE(dij.found);
+    ASSERT_TRUE(bidir.found);
+    ASSERT_TRUE(bidir.nodes_expanded < dij.nodes_expanded);
 }
 
 int main() { return testing::RunAll(); }
